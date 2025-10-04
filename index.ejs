@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>ProGPT</title>
+  <style>
+    body { font-family: sans-serif; background: #f7f7f7; margin:0; }
+    .sidebar { width: 250px; background:#fff; border-right:1px solid #ccc; float:left; height:100vh; padding:10px; overflow:auto;}
+    .chat { margin-left:250px; padding:20px; height:100vh; display:flex; flex-direction:column; }
+    .messages { flex:1; overflow:auto; padding:10px; background:#fff; margin-bottom:10px; border-radius:8px; }
+    .msg { margin:5px 0; }
+    .msg.user { text-align:right; color:blue; }
+    img { max-width:200px; border-radius:8px; }
+  </style>
+</head>
+<body>
+  <div class="sidebar">
+    <h3>Menü</h3>
+    <% if (!user) { %>
+      <a href="/auth/google">Google ile Giriş Yap</a>
+    <% } else { %>
+      <p><b><%= user.displayName %></b></p>
+      <a href="/logout">Çıkış Yap</a>
+      <h4>Geçmiş Sohbetler</h4>
+      <ul id="chatHistory"></ul>
+      <button onclick="newChat()">Yeni Sohbet</button>
+    <% } %>
+  </div>
+
+  <div class="chat">
+    <div class="messages" id="messages"></div>
+    <% if (user) { %>
+    <div>
+      <input id="input" placeholder="Mesaj yaz..." style="width:40%">
+      <input id="size" placeholder="Resim boyutu (512x512,1024x1024)" style="width:20%">
+      <button onclick="sendMessage()">Gönder</button>
+      <button onclick="generateImage()">Resim Oluştur</button>
+      <input type="file" id="fileInput" onchange="uploadImage()">
+    </div>
+    <% } else { %>
+    <p>Devam etmek için giriş yapın.</p>
+    <% } %>
+  </div>
+
+  <script>
+    const messagesDiv = document.getElementById("messages");
+    const input = document.getElementById("input");
+    let currentSession = "Varsayılan Sohbet"; // default sohbet adı
+
+    function addMessage(role, text, img) {
+      const div = document.createElement("div");
+      div.className = "msg " + role;
+      if (text) div.innerText = text;
+      if (img) {
+        const image = document.createElement("img");
+        image.src = img;
+        div.appendChild(image);
+      }
+      messagesDiv.appendChild(div);
+      messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    }
+
+    function newChat() {
+      const name = prompt("Yeni sohbet ismini gir:");
+      if (!name) return;
+      currentSession = name;
+      messagesDiv.innerHTML = "";
+      loadHistory();
+    }
+
+    async function sendMessage() {
+      const msg = input.value;
+      if (!msg) return;
+      input.value = "";
+      addMessage("user", msg);
+
+      const res = await fetch("/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: msg, sessionName: currentSession })
+      });
+
+      const data = await res.json();
+      const bot = data.choices?.[0]?.message?.content;
+      addMessage("assistant", bot);
+
+      loadHistory();
+    }
+
+    async function generateImage() {
+      const msg = input.value;
+      const size = document.getElementById("size").value;
+      input.value = "";
+      addMessage("user", msg);
+
+      const res = await fetch("/image/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: msg, size })
+      });
+      const data = await res.json();
+      const url = data.data?.[0]?.url;
+      addMessage("assistant", "", url);
+    }
+
+    async function uploadImage() {
+      const file = document.getElementById("fileInput").files[0];
+      const form = new FormData();
+      form.append("file", file);
+
+      const res = await fetch("/image/upload", {
+        method: "POST",
+        body: form
+      });
+      const data = await res.json();
+      addMessage("user", "", URL.createObjectURL(file));
+    }
+
+    async function loadHistory() {
+      const res = await fetch("/history");
+      const data = await res.json();
+      const ul = document.getElementById("chatHistory");
+      ul.innerHTML = "";
+      data.forEach(s => {
+        const li = document.createElement("li");
+        li.innerText = s.name;
+        li.style.cursor = "pointer";
+        li.onclick = () => loadSession(s.name);
+        ul.appendChild(li);
+      });
+    }
+
+    async function loadSession(sessionName) {
+      const res = await fetch("/history");
+      const data = await res.json();
+      const session = data.find(s => s.name === sessionName);
+      if (!session) return;
+      messagesDiv.innerHTML = "";
+      session.messages.forEach(m => addMessage(m.role, m.content));
+      currentSession = sessionName;
+    }
+
+    if (<%= user ? "true" : "false" %>) loadHistory();
+  </script>
+</body>
+</html>
